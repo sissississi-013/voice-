@@ -20,7 +20,7 @@ MODEL = "Qwen/Qwen3.8-27B-FP8"
 NO_THINK = {"enable_thinking": False}
 PROFILE = (ROOT / "profile.md").read_text() if (ROOT / "profile.md").exists() else ""
 DRAFT_PROMPT = """You draft messages for the user described below. You are told the website, the text field
-they clicked (its label/placeholder), and the surrounding page text.
+they clicked (its label/placeholder), and the ENTIRE page text. Read all of it first: figure out what the page is, who is involved, and what is being discussed, then draft.
 - If the page shows a message addressed to them, write replies to it.
 - Otherwise write what THEY would plausibly type into this specific field on this site, using facts from their profile.
 Write 3 short, distinct, specific options (different intents). Never invent facts beyond the profile and page.
@@ -47,7 +47,7 @@ def in_my_voice(text, temperature):
 
 def drafts(context, field="", site=""):
     raw = sc.content(client.chat_complete(
-        [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": f"SITE: {site}\nFIELD: {field}\nPAGE TEXT:\n{context[-3000:]}"}],
+        [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": f"SITE: {site}\nFIELD: {field}\nPAGE TEXT:\n{context[:12000]}"}],
         base_model=MODEL, max_tokens=1500, temperature=0.8, chat_template_kwargs=NO_THINK))
     try:
         return [str(d) for d in json.loads(raw[raw.find("["):raw.rfind("]") + 1])][:3]

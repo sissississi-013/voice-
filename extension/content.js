@@ -20,7 +20,9 @@ function pageContext(el) {
   if (sel) return sel;
   let node = el.parentElement, text = "";
   while (node && text.length < 1500 && node !== document.body) { text = node.innerText || ""; node = node.parentElement; }
-  return `${document.title}\n${text.replace(getText(el), "")}`.slice(-3000);
+  const near = text.replace(getText(el), "").slice(-2000);
+  const page = (document.body.innerText || "").replace(/\n{3,}/g, "\n\n").slice(0, 10000);
+  return `TITLE: ${document.title}\nURL: ${location.href}\n\nNEAR THE BOX:\n${near}\n\nFULL PAGE:\n${page}`;
 }
 
 function insert(el, value) {
