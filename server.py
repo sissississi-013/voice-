@@ -18,9 +18,16 @@ import river_client as river
 ROOT = Path(__file__).parent
 MODEL = "Qwen/Qwen3.8-27B-FP8"
 NO_THINK = {"enable_thinking": False}
-DRAFT_PROMPT = """You help the user reply. Given the page context (what they are replying to),
-write 3 short, distinct replies the user might send (e.g. agree / ask a question / decline or redirect).
-Return only a JSON array of 3 strings."""
+PROFILE = (ROOT / "profile.md").read_text() if (ROOT / "profile.md").exists() else ""
+DRAFT_PROMPT = """You draft messages for the user described below. You are told the website, the text field
+they clicked (its label/placeholder), and the surrounding page text.
+- If the page shows a message addressed to them, write replies to it.
+- Otherwise write what THEY would plausibly type into this specific field on this site, using facts from their profile.
+Write 3 short, distinct, specific options (different intents). Never invent facts beyond the profile and page.
+Return only a JSON array of 3 strings.
+
+USER PROFILE:
+""" + PROFILE
 
 client = river.Client(api_key=os.environ["RIVER_API_KEY"], endpoint="api.river.ai", port=443)
 session = client.session(experiment="sissi-voice-bubble").__enter__()
@@ -38,9 +45,9 @@ def in_my_voice(text, temperature):
         return None
 
 
-def drafts(context):
+def drafts(context, field="", site=""):
     raw = sc.content(client.chat_complete(
-        [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": context[-3000:]}],
+        [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": f"SITE: {site}\nFIELD: {field}\nPAGE TEXT:\n{context[-3000:]}"}],
         base_model=MODEL, max_tokens=1500, temperature=0.8, chat_template_kwargs=NO_THINK))
     try:
         return [str(d) for d in json.loads(raw[raw.find("["):raw.rfind("]") + 1])][:3]
@@ -48,11 +55,11 @@ def drafts(context):
         return [line.strip("-*0123456789. \"") for line in raw.splitlines() if line.strip()][:3]
 
 
-def suggest(text, context):
+def suggest(text, context, field="", site=""):
     if text.strip():
         jobs = [(text, t) for t in (0.2, 0.7, 1.0)]
     else:
-        jobs = [(d, 0.4) for d in drafts(context or "Start a new message.")]
+        jobs = [(d, 0.4) for d in drafts(context, field, site)]
     outs = list(pool.map(lambda j: in_my_voice(*j), jobs))
     return list(dict.fromkeys(o for o in outs if o))
 
@@ -69,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         try:
-            data, code = {"suggestions": suggest(body.get("text", ""), body.get("context", ""))}, 200
+            data, code = {"suggestions": suggest(body.get("text", ""), body.get("context", ""), body.get("field", ""), body.get("site", ""))}, 200
         except Exception as exc:
             data, code = {"error": f"{type(exc).__name__}: {exc}"}, 500
         out = json.dumps(data, ensure_ascii=False).encode()

@@ -1,4 +1,16 @@
-const EDITABLE = 'textarea, input[type="text"], input[type="search"], input:not([type]), [contenteditable=""], [contenteditable="true"]';
+const EDITABLE = 'textarea, input[type="text"], input:not([type]), [contenteditable=""], [contenteditable="true"]';
+const SKIP = /search|query|find|filter|url|address|password|email|e-mail|zip|phone|code|username|login|captcha|amount|date/i;
+
+function fieldLabel(el) {
+  const byId = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+  return [el.getAttribute("aria-label"), el.getAttribute("placeholder"), el.name, byId?.innerText, el.getAttribute("data-placeholder")]
+    .filter(Boolean).join(" | ").slice(0, 200);
+}
+
+function skip(el) {
+  if (el.getAttribute("role") === "combobox" || el.closest('[role="search"], form[action*="search"]')) return true;
+  return el.tagName === "INPUT" && SKIP.test(`${el.name} ${el.id} ${fieldLabel(el)} ${el.autocomplete}`);
+}
 let bubble, target, timer, seq = 0;
 
 function getText(el) { return el.isContentEditable ? el.innerText : el.value; }
@@ -7,7 +19,7 @@ function pageContext(el) {
   const sel = String(window.getSelection() || "").trim();
   if (sel) return sel;
   let node = el.parentElement, text = "";
-  while (node && text.length < 400 && node !== document.body) { text = node.innerText || ""; node = node.parentElement; }
+  while (node && text.length < 1500 && node !== document.body) { text = node.innerText || ""; node = node.parentElement; }
   return `${document.title}\n${text.replace(getText(el), "")}`.slice(-3000);
 }
 
@@ -23,6 +35,7 @@ function insert(el, value) {
 }
 
 function show(el, html) {
+  const r = el.getBoundingClientRect ? el.getBoundingClientRect() : el;
   if (!bubble) {
     bubble = document.createElement("div");
     bubble.id = "sissi-voice-bubble";
@@ -35,7 +48,6 @@ function show(el, html) {
     bubble.addEventListener("mousedown", (e) => e.preventDefault());
     document.body.appendChild(bubble);
   }
-  const r = el.getBoundingClientRect();
   const below = r.bottom + 170 < innerHeight;
   bubble.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 370))}px`;
   bubble.style.top = below ? `${r.bottom + 6}px` : "";
@@ -50,7 +62,7 @@ function request(el) {
   const id = ++seq;
   show(el, `<div style="opacity:.6">✨ thinking in your voice…</div>`);
   bubble.style.pointerEvents = "auto";
-  chrome.runtime.sendMessage({ text: getText(el), context: pageContext(el) }, (res) => {
+  chrome.runtime.sendMessage({ text: getText(el), context: pageContext(el), field: fieldLabel(el), site: `${location.hostname} — ${document.title}` }, (res) => {
     if (id !== seq || target !== el) return;
     if (!res || res.error) return show(el, `<div style="color:#b00">${res?.error ? "hiccup, retrying…" : "voice server offline"}</div>`), res?.error && setTimeout(() => target === el && request(el), 500);
     show(el, `<div style="font-size:11px;opacity:.55;margin:0 4px 6px">✨ in your voice</div>`);
@@ -68,7 +80,7 @@ function request(el) {
 
 document.addEventListener("focusin", (e) => {
   const el = e.target.closest?.(EDITABLE);
-  if (!el) return;
+  if (!el || skip(el)) return;
   target = el;
   request(el);
 });
@@ -79,3 +91,49 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("focusout", (e) => { if (e.target === target) { target = null; hide(); } });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+
+// Highlight any text -> say it in my voice.
+let selRange = null;
+document.addEventListener("mouseup", (e) => {
+  if (bubble && bubble.contains(e.target)) return;
+  setTimeout(() => {
+    const sel = window.getSelection();
+    const active = document.activeElement;
+    const editable = active && active.matches?.(EDITABLE) ? active : null;
+    const inField = editable && !editable.isContentEditable;
+    const text = (inField ? editable.value.slice(editable.selectionStart, editable.selectionEnd) : String(sel || "")).trim();
+    if (text.length < 8 || (!inField && !sel.rangeCount)) return;
+    selRange = inField ? null : sel.getRangeAt(0).cloneRange();
+    let rect = inField ? editable.getBoundingClientRect() : selRange.getBoundingClientRect();
+    const id = ++seq;
+    target = editable || document.body;
+    show(rect, `<div style="opacity:.6">✨ saying it in your voice…</div>`);
+    bubble.style.pointerEvents = "auto";
+    chrome.runtime.sendMessage({ text, context: "", field: "rewrite selection", site: location.hostname }, (res) => {
+      if (id !== seq) return;
+      if (!res || res.error) return show(rect, `<div style="color:#b00">hiccup — try again</div>`);
+      show(rect, `<div style="font-size:11px;opacity:.55;margin:0 4px 6px">✨ in your voice${editable ? " — click to replace" : " — click to copy"}</div>`);
+      for (const s of res.suggestions) {
+        const b = document.createElement("div");
+        b.textContent = s;
+        Object.assign(b.style, { padding: "7px 10px", margin: "3px 0", borderRadius: "10px", cursor: "pointer", background: "#f6efdf" });
+        b.onmouseenter = () => (b.style.background = "#efe2c4");
+        b.onmouseleave = () => (b.style.background = "#f6efdf");
+        b.onclick = () => {
+          if (editable) {
+            editable.focus();
+            if (selRange) { const w = window.getSelection(); w.removeAllRanges(); w.addRange(selRange); }
+            document.execCommand("insertText", false, s);
+          } else {
+            navigator.clipboard.writeText(s);
+            b.textContent = "copied ✓";
+            setTimeout(hide, 600);
+            return;
+          }
+          hide();
+        };
+        bubble.appendChild(b);
+      }
+    });
+  }, 10);
+});
