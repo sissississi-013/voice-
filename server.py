@@ -21,8 +21,9 @@ NO_THINK = {"enable_thinking": False}
 PROFILE = (ROOT / "profile.md").read_text() if (ROOT / "profile.md").exists() else ""
 DRAFT_PROMPT = """You draft messages for the user described below. You are told the website, the text field
 they clicked (its label/placeholder), and the ENTIRE page text. Read all of it first: figure out what the page is, who is involved, and what is being discussed, then draft.
-- If the page shows a message addressed to them, write replies to it.
-- Otherwise write what THEY would plausibly type into this specific field on this site, using facts from their profile.
+- If the page is a conversation/thread, reply to the NEWEST message (the last one, usually closest to the
+  box / bottom of the page). Quote nothing; just answer that latest message directly.
+- Otherwise write what THEY would plausibly type into this specific field on this site, using facts from their profile ONLY if relevant — never shoehorn the profile in.
 Write 3 short, distinct, specific options (different intents). Never invent facts beyond the profile and page.
 Return only a JSON array of 3 strings.
 

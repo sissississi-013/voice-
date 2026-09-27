@@ -21,7 +21,8 @@ function pageContext(el) {
   let node = el.parentElement, text = "";
   while (node && text.length < 1500 && node !== document.body) { text = node.innerText || ""; node = node.parentElement; }
   const near = text.replace(getText(el), "").slice(-2000);
-  const page = (document.body.innerText || "").replace(/\n{3,}/g, "\n\n").slice(0, 10000);
+  const all = (document.body.innerText || "").replace(/\n{3,}/g, "\n\n");
+  const page = all.length > 10000 ? `${all.slice(0, 2000)}\n…\n${all.slice(-8000)}` : all;
   return `TITLE: ${document.title}\nURL: ${location.href}\n\nNEAR THE BOX:\n${near}\n\nFULL PAGE:\n${page}`;
 }
 
@@ -66,7 +67,7 @@ function request(el) {
   bubble.style.pointerEvents = "auto";
   chrome.runtime.sendMessage({ text: getText(el), context: pageContext(el), field: fieldLabel(el), site: `${location.hostname} — ${document.title}` }, (res) => {
     if (id !== seq || target !== el) return;
-    if (!res || res.error) return show(el, `<div style="color:#b00">${res?.error ? "hiccup, retrying…" : "voice server offline"}</div>`), res?.error && setTimeout(() => target === el && request(el), 500);
+    if (!res || res.error) return show(el, `<div style="color:#b00">${res?.error ? "hiccup: " + String(res.error).slice(0, 80) : "voice server offline — refresh tab"}</div>`);
     show(el, `<div style="font-size:11px;opacity:.55;margin:0 4px 6px">✨ in your voice</div>`);
     for (const s of res.suggestions) {
       const b = document.createElement("div");
