@@ -68,8 +68,14 @@ Calls run in parallel (~2–7 s). A single failed generation is skipped instead 
 - `content.js` listens for focus on any `textarea`, text `input`, or `contenteditable` (Gmail, X, Slack web, …), grabs context (selected text, or nearby page text and the title), and floats a bubble next to the box. It re-queries 900 ms after you stop typing. Click a suggestion to insert it (works with React inputs and contenteditable); Esc closes the bubble.
 - `background.js` proxies requests to `127.0.0.1:8765`, so page CSP never blocks it.
 
-### 6. iMessage — `mac/VoiceHelper.swift`
-A ~250-line native Swift helper that uses only Apple APIs, with no third-party tools. While Messages is frontmost, it watches the focused text field via Accessibility. When you type **`@v`**, or **`@v <hint>`** (e.g. `@v say no nicely`), it reads the visible conversation from the Messages window, asks `server.py` for 3 drafts that reply to the newest message in your voice, and shows them in a floating bubble. Clicking one replaces the field; it never sends by itself. In Chrome the same `@v` / `@v <hint>` trigger works in any text box.
+### 6. Every app, no plugin: `mac/VoiceHelper.swift`
+A native Swift helper that uses only Apple APIs and works in **any app**: Messages, Chrome, Slack, WeChat, Notes, Mail… Type **`@v`**, or **`@v <hint>`** (e.g. `@v say no nicely`), in any text box:
+1. Accessibility reads the focused field and the conversation or page around it. For Chrome and Electron apps it turns on web accessibility and reads just the web page. Password and search fields are ignored.
+2. **Phase 1, about 2–3 s:** `POST /draft` returns 3 base drafts that answer the newest message, and they appear in a floating bubble immediately.
+3. **Phase 2, about 3 s each:** `POST /voice` restyles each draft with the River LoRA, and each option upgrades in place as it lands.
+4. Click one to insert it (through AX, or select-all + paste for web editors). It never sends by itself.
+
+The Chrome extension in `extension/` still works, but it's optional now.
 
 ```bash
 cd mac && swiftc -O -o VoiceHelper VoiceHelper.swift -framework Cocoa && ./VoiceHelper
