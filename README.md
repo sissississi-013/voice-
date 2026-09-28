@@ -68,6 +68,14 @@ Calls run in parallel (~2–7 s). A single failed generation is skipped instead 
 - `content.js` listens for focus on any `textarea`, text `input`, or `contenteditable` (Gmail, X, Slack web, …), grabs context (selected text, or nearby page text and the title), and floats a bubble next to the box. It re-queries 900 ms after you stop typing. Click a suggestion to insert it (works with React inputs and contenteditable); Esc closes the bubble.
 - `background.js` proxies requests to `127.0.0.1:8765`, so page CSP never blocks it.
 
+### 6. iMessage — `mac/VoiceHelper.swift`
+A ~250-line native Swift helper that uses only Apple APIs, with no third-party tools. While Messages is frontmost, it watches the focused text field via Accessibility. When you type **`@v`**, or **`@v <hint>`** (e.g. `@v say no nicely`), it reads the visible conversation from the Messages window, asks `server.py` for 3 drafts that reply to the newest message in your voice, and shows them in a floating bubble. Clicking one replaces the field; it never sends by itself. In Chrome the same `@v` / `@v <hint>` trigger works in any text box.
+
+```bash
+cd mac && swiftc -O -o VoiceHelper VoiceHelper.swift -framework Cocoa && ./VoiceHelper
+```
+Needs Accessibility permission for your terminal (System Settings → Privacy & Security → Accessibility).
+
 ## Run it
 
 ```bash
