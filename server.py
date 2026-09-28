@@ -46,9 +46,11 @@ def in_my_voice(text, temperature):
         return None
 
 
-def drafts(context, field="", site=""):
+def drafts(context, field="", site="", hint="", started=""):
     raw = sc.content(client.chat_complete(
-        [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": f"SITE: {site}\nFIELD: {field}\nPAGE TEXT:\n{context[:12000]}"}],
+        [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": f"SITE: {site}\nFIELD: {field}\nPAGE TEXT:\n{context[:12000]}"
+         + (f"\n\nTHEY ALREADY STARTED WRITING: {started}" if started else "")
+         + (f"\n\nTHEIR INSTRUCTION FOR THIS MESSAGE (follow it closely): {hint}" if hint else "")}],
         base_model=MODEL, max_tokens=1500, temperature=0.8, chat_template_kwargs=NO_THINK))
     try:
         return [str(d) for d in json.loads(raw[raw.find("["):raw.rfind("]") + 1])][:3]
@@ -56,8 +58,10 @@ def drafts(context, field="", site=""):
         return [line.strip("-*0123456789. \"") for line in raw.splitlines() if line.strip()][:3]
 
 
-def suggest(text, context, field="", site=""):
-    if text.strip():
+def suggest(text, context, field="", site="", hint=""):
+    if hint:
+        jobs = [(d, 0.4) for d in drafts(context, field, site, hint, text)]
+    elif text.strip():
         jobs = [(text, t) for t in (0.2, 0.7, 1.0)]
     else:
         jobs = [(d, 0.4) for d in drafts(context, field, site)]
@@ -77,7 +81,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         try:
-            data, code = {"suggestions": suggest(body.get("text", ""), body.get("context", ""), body.get("field", ""), body.get("site", ""))}, 200
+            data, code = {"suggestions": suggest(body.get("text", ""), body.get("context", ""), body.get("field", ""), body.get("site", ""), body.get("hint", ""))}, 200
         except Exception as exc:
             data, code = {"error": f"{type(exc).__name__}: {exc}"}, 500
         out = json.dumps(data, ensure_ascii=False).encode()

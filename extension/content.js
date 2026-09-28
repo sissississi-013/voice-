@@ -65,7 +65,9 @@ function request(el) {
   const id = ++seq;
   show(el, `<div style="opacity:.6">✨ thinking in your voice…</div>`);
   bubble.style.pointerEvents = "auto";
-  chrome.runtime.sendMessage({ text: getText(el), context: pageContext(el), field: fieldLabel(el), site: `${location.hostname} — ${document.title}` }, (res) => {
+  const full = getText(el), m = full.match(TRIGGER);
+  const text = m ? full.slice(0, m.index).trim() : full, hint = m?.[2]?.trim() || "";
+  chrome.runtime.sendMessage({ text, hint, context: pageContext(el), field: fieldLabel(el), site: `${location.hostname} — ${document.title}` }, (res) => {
     if (id !== seq || target !== el) return;
     if (!res || res.error) return show(el, `<div style="color:#b00">${res?.error ? "hiccup: " + String(res.error).slice(0, 80) : "voice server offline — refresh tab"}</div>`);
     show(el, `<div style="font-size:11px;opacity:.55;margin:0 4px 6px">✨ in your voice</div>`);
@@ -81,16 +83,17 @@ function request(el) {
   });
 }
 
-document.addEventListener("focusin", (e) => {
+// Only draft when you type "@v" (optionally followed by a hint, e.g. "@v say no nicely").
+const TRIGGER = /(^|\s)@v(?:\s+(.*))?$/s;
+document.addEventListener("input", (e) => {
   const el = e.target.closest?.(EDITABLE);
   if (!el || skip(el)) return;
-  target = el;
-  request(el);
-});
-document.addEventListener("input", (e) => {
-  if (e.target !== target) return;
+  const m = getText(el).match(TRIGGER);
   clearTimeout(timer);
-  timer = setTimeout(() => request(target), 900);
+  if (!m) { if (target === el) hide(); return; }
+  target = el;
+  show(el, `<div style="opacity:.6">✨ @v ${m[2] ? "— " + m[2].replace(/</g, "&lt;") : ""} (keep typing a hint, or wait)</div>`);
+  timer = setTimeout(() => request(el), 1100);
 });
 document.addEventListener("focusout", (e) => { if (e.target === target) { target = null; hide(); } });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
