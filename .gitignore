@@ -12,3 +12,4 @@ profile.md
 mac/VoiceHelper
 mac/*.log
 uv.lock
+logs/

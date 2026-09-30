@@ -172,7 +172,25 @@ final class Helper {
 
     init() {
         bubble.onPick = { [weak self] text in self?.insert(text) }
+        // River closes idle sessions (e.g. while the Mac sleeps). Reconnect before the user needs it.
+        warmup()
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self?.warmup() }
+        }
         Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.tick() }
+    }
+
+    /// Ping the server so it reconnects to River; retries while the server is still starting.
+    func warmup(attempt: Int = 1) {
+        var req = URLRequest(url: URL(string: server + "/warmup")!)
+        req.timeoutInterval = 90
+        URLSession.shared.dataTask(with: req) { _, response, _ in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            print("warmup attempt \(attempt): \(status)")
+            if status != 200 && attempt < 12 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.warmup(attempt: attempt + 1) }
+            }
+        }.resume()
     }
 
     func hide() { if bubble.isVisible { bubble.orderOut(nil) } }
@@ -219,21 +237,28 @@ final class Helper {
         DispatchQueue.main.asyncAfter(deadline: .now() + debounce, execute: work)
     }
 
-    func draft(id: Int, text: String, hint: String, site: String, context: String) {
+    func draft(id: Int, text: String, hint: String, site: String, context: String, retried: Bool = false) {
         bubble.show(status: "✨ drafting…")
         post("/draft", ["text": text, "hint": hint, "site": site, "field": "message box",
                         "context": "CONVERSATION / PAGE (oldest to newest; reply to the NEWEST message):\n\(context)"]) { [weak self] json, problem in
             guard let self, id == self.requestID else { return }
             let drafts = json?["drafts"] as? [String] ?? []
             if drafts.isEmpty {
-                self.bubble.show(status: "hiccup: \(problem ?? "no drafts") (is server.py running?)")
+                if json == nil {
+                    self.bubble.show(status: "voice server isn't running. Start it with `make serve`")
+                } else if !retried {
+                    self.bubble.show(status: "✨ reconnecting to your model…")
+                    self.draft(id: id, text: text, hint: hint, site: site, context: context, retried: true)
+                } else {
+                    self.bubble.show(status: "couldn't draft: \((problem ?? "no drafts").prefix(90))")
+                }
                 return
             }
             // Phase 1: show base drafts right away. Phase 2: swap each for its voiced version.
             self.options = drafts.map { ($0, false) }
             self.render()
             for (i, d) in drafts.enumerated() {
-                post("/voice", ["text": d, "temperature": [0.3, 0.6, 0.9][i % 3]]) { [weak self] json, _ in
+                post("/voice", ["text": d, "temperature": [0.3, 0.5, 0.7][i % 3]]) { [weak self] json, _ in
                     guard let self, id == self.requestID, i < self.options.count else { return }
                     let voiced = (json?["text"] as? String) ?? d
                     self.options[i] = (voiced, true)
@@ -283,7 +308,7 @@ final class Helper {
 setvbuf(stdout, nil, _IOLBF, 0)
 let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
 if !AXIsProcessTrustedWithOptions(prompt) {
-    print("Grant Accessibility: System Settings → Privacy & Security → Accessibility → enable your terminal, then rerun.")
+    print("Needs Accessibility: System Settings → Privacy & Security → Accessibility → enable \(CommandLine.arguments[0]).")
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

@@ -22,6 +22,7 @@ mac/VoiceHelper.swift, extension/  → clients
 | extract data | `make extract` | no |
 | train | `make train N=160 EPOCHS=2` | yes |
 | serve | `make serve` then `curl 127.0.0.1:8765/health` | yes |
+| background (launchd) | `scripts/install-launchd.sh` (`uninstall` to remove); logs in `logs/` | yes |
 
 Python scripts declare dependencies inline (PEP 723) and run with `uv run --no-project <script>`. Don't add a
 requirements file. River SDK is pinned to `river-client==0.10.0`; Python ≥ 3.12.
@@ -36,10 +37,13 @@ requirements file. River SDK is pinned to `river-client==0.10.0`; Python ≥ 3.1
 - **Never auto-send:** clients insert text into the field; the human presses Enter.
 - **`@v` trigger regex** must stay identical in `extension/content.js` and `mac/VoiceHelper.swift`
   (`tests/test_trigger.py` enforces this).
+- **All River calls go through `rv.call()`** in `server.py`, which reconnects and retries. Never cache the client or model
+  outside it; River closes idle sessions.
 - `style_chat.py` is vendored from River. Don't edit it; wrap it instead.
 
 ## Server API (for new clients)
 - `GET /health` → `{"ok": true, "model": "...", "lora": true|false}`
+- `GET /warmup` → reconnects to River if the session was closed (idle or sleep); clients call it on launch and wake.
 - `POST /draft {text, hint, context, site, field}` → `{"drafts": [3 strings]}`. Fast (~2–3 s), base model.
   Empty `text` and no `hint` means reply to the newest message in `context`. `text` with no `hint` means rewrite mode
   (returns `text` ×3 for `/voice` to restyle).

@@ -13,7 +13,10 @@ See README "Server API" for the endpoints.
 """
 import json
 import os
+import re
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,6 +36,9 @@ they clicked (its label/placeholder), and the ENTIRE page text. Read all of it f
 - If the page is a conversation/thread, reply to the NEWEST message (the last one, usually closest to the
   box / bottom of the page). Quote nothing; just answer that latest message directly.
 - Otherwise write what THEY would plausibly type into this specific field on this site, using facts from their profile ONLY if relevant — never shoehorn the profile in.
+Write in the SAME LANGUAGE as the newest message (Chinese → Chinese, Spanish → Spanish, mixed → mixed the same way).
+Never switch or mix in another language unless the newest message does. If the user already started writing,
+match the language they started in. A hint may be in any language; it only tells you what to say.
 Write 3 short, distinct, specific options (different intents). Never invent facts beyond the profile and page.
 Return only a JSON array of 3 strings.
 
@@ -47,38 +53,98 @@ def checkpoint_path():
     return json.loads(latest.read_text())["inference"] if latest.exists() else None
 
 
-client = river.Client(api_key=os.environ["RIVER_API_KEY"], endpoint="api.river.ai", port=443)
-voice = None
-if ckpt := checkpoint_path():
-    session = client.session(experiment="voice-server").__enter__()
-    voice = session.create_model(base_model=MODEL, lora=river.LoraConfig(rank=16))
-    voice.load_weights(ckpt, load_optimizer=False)
-else:
+class River:
+    """Owns the River client + LoRA session and transparently reconnects.
+
+    River closes idle sessions (e.g. after the Mac sleeps): calls then fail with
+    "Model is closed". Any failed call reconnects once and retries.
+    """
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.generation = 0
+        self.client = self.voice = self.session = self.session_ctx = None
+        self.ckpt = checkpoint_path()
+        self.connect(0)
+
+    def connect(self, seen_generation):
+        with self.lock:
+            if seen_generation != self.generation:
+                return  # another thread already reconnected
+            for close in (lambda: self.session_ctx.__exit__(None, None, None), lambda: self.client.close()):
+                try:
+                    close()
+                except Exception:
+                    pass  # already dead; we're replacing it
+            started = time.monotonic()
+            self.client = river.Client(api_key=os.environ["RIVER_API_KEY"], endpoint="api.river.ai", port=443)
+            self.voice = self.session = None
+            if self.ckpt:
+                self.session_ctx = self.client.session(experiment="voice-server")
+                self.session = self.session_ctx.__enter__()
+                self.voice = self.session.create_model(base_model=MODEL, lora=river.LoraConfig(rank=16))
+                self.voice.load_weights(self.ckpt, load_optimizer=False)
+            self.generation += 1
+            print(f"river connected (gen {self.generation}, lora={self.voice is not None}, {time.monotonic() - started:.1f}s)", flush=True)
+
+    def call(self, fn):
+        """fn(client, voice) -> result. Retries once after reconnecting."""
+        for attempt in (1, 2):
+            gen, client, voice = self.generation, self.client, self.voice
+            try:
+                return fn(client, voice)
+            except Exception as exc:
+                if attempt == 2:
+                    raise
+                print(f"river call failed ({type(exc).__name__}: {str(exc)[:120]}); reconnecting", flush=True)
+                self.connect(gen)
+
+
+def text_of(result):
+    """Like style_chat.content(), but keeps truncated output instead of raising."""
+    choice = json.loads(result.response_json)["choices"][0]
+    value = choice["message"].get("content")
+    if isinstance(value, list):
+        value = "".join(part.get("text", "") for part in value if isinstance(part, dict))
+    value = (value or "").strip()
+    if not value:
+        raise ValueError("model returned no text")
+    return value
+
+
+def json_strings(raw):
+    """Parse a JSON array of strings, tolerating truncation: returns every complete string."""
+    try:
+        return [str(d) for d in json.loads(raw[raw.find("["):raw.rfind("]") + 1])]
+    except Exception:
+        found = [json.loads(f'"{m}"') for m in re.findall(r'"((?:[^"\\]|\\.)*)"', raw)]
+        return found or [line.strip("-*0123456789. \"") for line in raw.splitlines() if line.strip()]
+
+
+rv = River()
+if not rv.ckpt:
     print("No LoRA checkpoint found (train one or set VOICE_CHECKPOINT); serving base model only.", flush=True)
 pool = ThreadPoolExecutor(6)
 
 
 def in_my_voice(text, temperature):
-    if voice is None:
+    if rv.voice is None:
         return text
     try:
-        return sc.content(voice.chat_complete(sc.style_messages(text[:1500]), max_tokens=300,
-                          temperature=temperature, chat_template_kwargs=NO_THINK))
+        return rv.call(lambda _, voice: text_of(voice.chat_complete(
+            sc.style_messages(text[:1500]), max_tokens=600, temperature=temperature, chat_template_kwargs=NO_THINK)))
     except Exception as exc:
-        print("voice error:", exc, flush=True)
+        print("voice error:", type(exc).__name__, str(exc)[:200], flush=True)
         return None
 
 
 def drafts(context, field="", site="", hint="", started=""):
-    raw = sc.content(client.chat_complete(
+    raw = rv.call(lambda client, _: text_of(client.chat_complete(
         [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": f"SITE: {site}\nFIELD: {field}\nPAGE TEXT:\n{context[:12000]}"
          + (f"\n\nTHEY ALREADY STARTED WRITING: {started}" if started else "")
          + (f"\n\nTHEIR INSTRUCTION FOR THIS MESSAGE (follow it closely): {hint}" if hint else "")}],
-        base_model=MODEL, max_tokens=400, temperature=0.8, chat_template_kwargs=NO_THINK))
-    try:
-        return [str(d) for d in json.loads(raw[raw.find("["):raw.rfind("]") + 1])][:3]
-    except Exception:
-        return [line.strip("-*0123456789. \"") for line in raw.splitlines() if line.strip()][:3]
+        base_model=MODEL, max_tokens=900, temperature=0.8, chat_template_kwargs=NO_THINK)))
+    return json_strings(raw)[:3]
 
 
 def suggest(text, context, field="", site="", hint=""):
@@ -115,7 +181,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            return self._send(200, {"ok": True, "model": MODEL, "lora": voice is not None})
+            return self._send(200, {"ok": True, "model": MODEL, "lora": rv.voice is not None, "generation": rv.generation})
+        if self.path == "/warmup":  # clients call this after the Mac wakes: reconnects if River closed the session
+            try:
+                rv.call(lambda client, voice: text_of((voice or client).chat_complete(
+                    [{"role": "user", "content": "hi"}], max_tokens=2, chat_template_kwargs=NO_THINK,
+                    **({} if voice else {"base_model": MODEL}))))
+                return self._send(200, {"ok": True, "generation": rv.generation})
+            except Exception as exc:
+                return self._send(503, {"error": f"{type(exc).__name__}: {exc}"})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -138,6 +212,7 @@ class Handler(BaseHTTPRequestHandler):
                 data, code = {"error": "not found"}, 404
         except Exception as exc:
             data, code = {"error": f"{type(exc).__name__}: {exc}"}, 500
+            print("error:", data["error"][:300], flush=True)
         self._send(code, data)
         print(code, self.path, f"{len(body.get('context', ''))} chars context", flush=True)
 
@@ -146,5 +221,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"voice server on http://127.0.0.1:{PORT} (lora: {voice is not None})", flush=True)
+    print(f"voice server on http://127.0.0.1:{PORT} (lora: {rv.voice is not None})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

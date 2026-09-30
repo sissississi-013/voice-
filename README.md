@@ -37,6 +37,8 @@ make serve      # local API on 127.0.0.1:8765  (leave running)
 make helper     # in another terminal: builds + runs the @v helper
 ```
 
+**Run it in the background (recommended):** `scripts/install-launchd.sh` installs two launch agents that start the server and helper at login, restart them if they crash, and log to `logs/`. Undo with `scripts/install-launchd.sh uninstall`.
+
 The first time you run the helper, macOS asks for **Accessibility** permission for your terminal (System Settings → Privacy & Security → Accessibility). Then type `@v` in any text box.
 
 `make test` / `make check` run the unit tests and lint without an API key.
@@ -78,6 +80,10 @@ This follows River's style-transfer recipe (`style_chat.py`). The base model rew
 | output | inference and resumable training checkpoints (`river://…`) in `runs/voice/latest.json` |
 
 ### 4. Serve: `server.py`
+**Reliability:** River closes idle sessions (for example while the Mac sleeps), and later calls fail with `Model is closed`. The server wraps every River call and on failure reconnects and retries once, which takes about 13 s. The helper calls `/warmup` when your Mac wakes, so the reconnect usually happens before you type. Truncated generations are kept rather than raised as errors.
+
+**Languages:** drafts reply in the language of the newest message (tested with English, Chinese, mixed Chinese/English, Spanish and Japanese), and the LoRA keeps that language when it restyles.
+
 A local HTTP server holds one River session with the LoRA loaded. Drafting is split in two so the UI never waits on the slow step: `/draft` asks base Qwen for 3 distinct replies to the newest message, using the page or conversation text, the app or site, your optional hint and `profile.md`. `/voice` then restyles each draft with your LoRA. See [Server API](#server-api).
 
 ## Results
@@ -101,7 +107,8 @@ Unfiltered outputs on the 4 sentences in [`demo_inputs.txt`](demo_inputs.txt), u
 
 | endpoint | body | returns | notes |
 |---|---|---|---|
-| `GET /health` | | `{"ok", "model", "lora"}` | |
+| `GET /health` | | `{"ok", "model", "lora", "generation"}` | |
+| `GET /warmup` | | `{"ok", "generation"}` | tiny River call; reconnects if River closed the session (the helper calls it at launch and on wake) |
 | `POST /draft` | `{text?, hint?, context?, site?, field?}` | `{"drafts": [3]}` | base model, ~2.5 s. Empty `text` → reply to the newest message in `context`; `hint` steers intent |
 | `POST /voice` | `{text, temperature?}` | `{"text"}` | LoRA restyle, ~3 s |
 | `POST /suggest` | same as `/draft` | `{"suggestions": [≤3]}` | `/draft` + `/voice` in one blocking call |
