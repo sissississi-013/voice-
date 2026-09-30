@@ -41,7 +41,7 @@ function show(el, html) {
   const r = el.getBoundingClientRect ? el.getBoundingClientRect() : el;
   if (!bubble) {
     bubble = document.createElement("div");
-    bubble.id = "sissi-voice-bubble";
+    bubble.id = "voice-bubble";
     Object.assign(bubble.style, {
       position: "fixed", zIndex: 2147483647, maxWidth: "360px", padding: "8px",
       background: "#fffdf7", border: "1px solid #e8dcc0", borderRadius: "14px",

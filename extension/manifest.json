@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Sissi Voice",
+  "name": "Voice",
   "version": "0.1",
   "description": "Suggests replies in your own voice, from your River-trained model.",
   "host_permissions": ["http://localhost:8765/*", "http://127.0.0.1:8765/*"],

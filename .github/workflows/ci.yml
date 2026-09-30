@@ -1,0 +1,16 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --no-project --python 3.12 --with pytest python -m pytest -q
+      - run: uv run --no-project --with ruff ruff check .
+      - run: node --check extension/content.js && node --check extension/background.js
+  macos-helper:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd mac && swiftc -O -o VoiceHelper VoiceHelper.swift -framework Cocoa

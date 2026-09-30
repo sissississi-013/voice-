@@ -1,0 +1,6 @@
+# About me — copy to profile.md (git-ignored). Fed to the drafting prompt as facts about you.
+# Keep it short and factual; the model is told to use it only when relevant.
+- Name: …  Languages: …  How I text: (e.g. lowercase, "u", "??", emoji?)
+- What I'm building: …
+- Current things people ask me about: (events, launches, dates, numbers)
+- Things I'd never say / topics to avoid: …

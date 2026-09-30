@@ -1,3 +1,7 @@
+# Vendored from River AI's "Own Your Intelligence" hackathon example:
+#   https://river.ai/assets/style_chat.py  (downloaded 2026-09-27, unmodified)
+# Voice imports its prompts and helpers (style_messages, normalization_messages, content, …).
+# Copyright belongs to River AI; not covered by this repo's LICENSE.
 # /// script
 # requires-python = ">=3.12"
 # dependencies = ["river-client==0.10.0", "prompt-toolkit>=3.0"]
